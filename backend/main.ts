@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import express from 'express';
+import cors from 'cors';
 import { postgraphile } from 'postgraphile';
 import PSI from '@graphile-contrib/pg-simplify-inflector';
 
@@ -29,6 +30,7 @@ import PSI from '@graphile-contrib/pg-simplify-inflector';
     });
 
     const app = express();
+    app.use(cors());
     app.use(postgraphile_middleware);
 
     await new Promise<void>(res => app.listen(PORT, res));
