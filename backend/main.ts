@@ -12,22 +12,24 @@ const {
 
     DB_HOST,
     DB_PORT,
-    DB_NAME,
-    DB_USER,
-    DB_PASSWORD
+    DB_NAME
 } = process.env;
 
-const db_url = `postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}`;
-console.log(`Database URL: postgres://${DB_USER}:[SECRET]@${DB_HOST}:${DB_PORT}/${DB_NAME}`);
+const db_url = `postgres://postgraphile:postgraphile1234@${DB_HOST}:${DB_PORT}/${DB_NAME}`;
+console.log(`Database URL: ${db_url}`);
 const postgraphile_middleware = postgraphile(db_url, "test", {
     graphiql: true,
     enhanceGraphiql: true,
+
+    pgDefaultRole: "anonymous",
+
     simpleCollections: 'only',
     appendPlugins: [PSI],
     graphileBuildOptions: {
         pgOmitListSuffix: true
     },
-    jwtSecret: JWT_SECRET
+    jwtSecret: JWT_SECRET,
+    jwtPgTypeIdentifier: "test.jwt_token"
 });
 
 const app = express();
