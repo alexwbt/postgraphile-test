@@ -22,13 +22,16 @@ export async function up(knex: Knex): Promise<void> {
         table.increments();
         table.string('email', 256).notNullable().unique();
         table.string('password').notNullable();
+        table.bigInteger('valid_token').defaultTo(0);
+        table.timestamps(false, true);
     });
 
     // create table account info
     await knex.schema.withSchema('test').createTable('account_info', table => {
         table.increments();
-        table.integer('account_id').references('id').inTable('test_private.account').onUpdate('CASCADE').onDelete('CASCADE');
+        table.bigInteger('account_id').references('id').inTable('test_private.account').onUpdate('CASCADE').onDelete('CASCADE');
         table.string('name', 50);
+        table.timestamps(false, true);
     });
 
     // authentication
@@ -41,11 +44,20 @@ export async function up(knex: Knex): Promise<void> {
 
         -- auth function
         create function test.authenticate(email text, password text) returns test.jwt_token as $$
-            select ('app_user', id)::test.jwt_token
-                from test_private.account
-                where account.email = $1
-                    and account.password = crypt($2, account.password);
-        $$ language sql strict security definer;
+            declare
+                token test.jwt_token;
+            begin
+                update test_private.account
+                    set valid_token = cast(extract(epoch from now()) as bigint)
+                    where account.email = $1;
+                select 'app_user', id
+                    into token
+                    from test_private.account
+                    where account.email = $1
+                        and account.password = crypt($2, account.password);
+                return token;
+            end;
+        $$ language plpgsql strict security definer;
 
         -- register function
         create function test.register_account(name text, email text, password text) returns integer as $$
@@ -55,6 +67,25 @@ export async function up(knex: Knex): Promise<void> {
                 insert into test_private.account (email, password) values ($2, crypt($3, gen_salt('bf'))) returning id into return_id;
                 insert into test.account_info (account_id, name) values (return_id, $1);
                 return return_id;
+            end;
+        $$ language plpgsql strict security definer;
+
+        -- valid token function
+        create function test.valid_token() returns boolean as $$
+            declare
+                last_iat bigint;
+            begin
+                select valid_token
+                    into last_iat
+                    from test_private.account
+                    where id = current_setting('jwt.claims.account_id', true)::integer;
+
+                if last_iat > current_setting('jwt.claims.iat', true)::integer then
+                    raise exception 'invalid jwt token';
+                    return false;
+                else
+                    return true;
+                end if;
             end;
         $$ language plpgsql strict security definer;
     `);
@@ -71,7 +102,7 @@ export async function up(knex: Knex): Promise<void> {
         -- account_info
         grant select on table test.account_info to app_user;
         alter table test.account_info enable row level security;
-        create policy select_account_info on test.account_info for select using (account_id = current_setting('jwt.claims.account_id', true)::integer);
+        create policy select_account_info on test.account_info for select using (account_id = current_setting('jwt.claims.account_id', true)::integer and test.valid_token());
     `);
 }
 
@@ -93,6 +124,7 @@ export async function down(knex: Knex): Promise<void> {
 
     // authentication
     await knex.schema.raw(/*sql*/`
+        drop function test.valid_token;
         drop function test.register_account;
         drop function test.authenticate;
         drop type test.jwt_token;
