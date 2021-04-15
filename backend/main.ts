@@ -21,7 +21,7 @@ const postgraphile_middleware = postgraphile(db_url, "test", {
     graphiql: true,
     enhanceGraphiql: true,
 
-    pgDefaultRole: "anonymous",
+    pgDefaultRole: "anonymous_user",
 
     simpleCollections: 'only',
     appendPlugins: [PSI],
