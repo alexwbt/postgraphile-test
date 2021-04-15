@@ -7,7 +7,7 @@ export async function up(knex: Knex): Promise<void> {
 
     // create roles
     await knex.schema.raw(/*sql*/`
-        -- postgraphile
+        -- postgrpahile
         create role postgraphile login password 'postgraphile1234';
         -- anonymous
         create role anonymous_user;
@@ -22,43 +22,30 @@ export async function up(knex: Knex): Promise<void> {
         table.increments();
         table.string('email', 256).notNullable().unique();
         table.string('password').notNullable();
-        table.specificType('signed_at', 'double precision').defaultTo(0);
-        table.timestamps(false, true);
     });
 
     // create table account info
     await knex.schema.withSchema('test').createTable('account_info', table => {
         table.increments();
-        table.bigInteger('account_id').references('id').inTable('test_private.account').onUpdate('CASCADE').onDelete('CASCADE');
+        table.integer('account_id').references('id').inTable('test_private.account').onUpdate('CASCADE').onDelete('CASCADE');
         table.string('name', 50);
-        table.timestamps(false, true);
     });
 
     // authentication
     await knex.schema.raw(/*sql*/`
         -- token type
-        create type test.jwt_token as (role text, account_id integer, signed_at double precision);
+        create type test.jwt_token as (role text, account_id integer);
 
         -- enable pgcrypto
         create extension if not exists "pgcrypto";
 
         -- auth function
         create function test.authenticate(email text, password text) returns test.jwt_token as $$
-            declare
-                now_epoch double precision := extract(epoch from now());
-                token test.jwt_token;
-            begin
-                select 'app_user', id, now_epoch
-                    into token
-                    from test_private.account
-                    where account.email = $1
-                        and account.password = crypt($2, account.password);
-                update test_private.account
-                    set signed_at = now_epoch
-                    where account.id = token.account_id;
-                return token;
-            end;
-        $$ language plpgsql strict security definer;
+            select ('app_user', id)::test.jwt_token
+                from test_private.account
+                where account.email = $1
+                    and account.password = crypt($2, account.password);
+        $$ language sql strict security definer;
 
         -- register function
         create function test.register_account(name text, email text, password text) returns integer as $$
@@ -68,25 +55,6 @@ export async function up(knex: Knex): Promise<void> {
                 insert into test_private.account (email, password) values ($2, crypt($3, gen_salt('bf'))) returning id into return_id;
                 insert into test.account_info (account_id, name) values (return_id, $1);
                 return return_id;
-            end;
-        $$ language plpgsql strict security definer;
-
-        -- valid token function
-        create function test.valid_token() returns boolean as $$
-            declare
-                last_signed_at double precision;
-            begin
-                select signed_at
-                    into last_signed_at
-                    from test_private.account
-                    where id = current_setting('jwt.claims.account_id', true)::integer;
-
-                if last_signed_at != current_setting('jwt.claims.signed_at', true)::double precision then
-                    raise exception 'invalid jwt token';
-                    return false;
-                else
-                    return true;
-                end if;
             end;
         $$ language plpgsql strict security definer;
     `);
@@ -103,7 +71,7 @@ export async function up(knex: Knex): Promise<void> {
         -- account_info
         grant select on table test.account_info to app_user;
         alter table test.account_info enable row level security;
-        create policy select_account_info on test.account_info for select using (account_id = current_setting('jwt.claims.account_id', true)::integer and test.valid_token());
+        create policy select_account_info on test.account_info for select using (account_id = current_setting('jwt.claims.account_id', true)::integer);
     `);
 }
 
@@ -125,7 +93,6 @@ export async function down(knex: Knex): Promise<void> {
 
     // authentication
     await knex.schema.raw(/*sql*/`
-        drop function test.valid_token;
         drop function test.register_account;
         drop function test.authenticate;
         drop type test.jwt_token;
