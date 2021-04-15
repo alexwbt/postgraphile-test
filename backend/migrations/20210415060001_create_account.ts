@@ -7,7 +7,7 @@ export async function up(knex: Knex): Promise<void> {
 
     // create roles
     await knex.schema.raw(/*sql*/`
-        -- postgrpahile
+        -- postgraphile
         create role postgraphile login password 'postgraphile1234';
         -- anonymous
         create role anonymous_user;
@@ -22,7 +22,7 @@ export async function up(knex: Knex): Promise<void> {
         table.increments();
         table.string('email', 256).notNullable().unique();
         table.string('password').notNullable();
-        table.bigInteger('valid_token').defaultTo(0);
+        table.specificType('signed_at', 'double precision').defaultTo(0);
         table.timestamps(false, true);
     });
 
@@ -37,7 +37,7 @@ export async function up(knex: Knex): Promise<void> {
     // authentication
     await knex.schema.raw(/*sql*/`
         -- token type
-        create type test.jwt_token as (role text, account_id integer);
+        create type test.jwt_token as (role text, account_id integer, signed_at double precision);
 
         -- enable pgcrypto
         create extension if not exists "pgcrypto";
@@ -45,16 +45,17 @@ export async function up(knex: Knex): Promise<void> {
         -- auth function
         create function test.authenticate(email text, password text) returns test.jwt_token as $$
             declare
+                now_epoch double precision := extract(epoch from now());
                 token test.jwt_token;
             begin
-                update test_private.account
-                    set valid_token = cast(extract(epoch from now()) as bigint)
-                    where account.email = $1;
-                select 'app_user', id
+                select 'app_user', id, now_epoch
                     into token
                     from test_private.account
                     where account.email = $1
                         and account.password = crypt($2, account.password);
+                update test_private.account
+                    set signed_at = now_epoch
+                    where account.id = token.account_id;
                 return token;
             end;
         $$ language plpgsql strict security definer;
@@ -73,14 +74,14 @@ export async function up(knex: Knex): Promise<void> {
         -- valid token function
         create function test.valid_token() returns boolean as $$
             declare
-                last_iat bigint;
+                last_signed_at double precision;
             begin
-                select valid_token
-                    into last_iat
+                select signed_at
+                    into last_signed_at
                     from test_private.account
                     where id = current_setting('jwt.claims.account_id', true)::integer;
 
-                if last_iat > current_setting('jwt.claims.iat', true)::integer then
+                if last_signed_at != current_setting('jwt.claims.signed_at', true)::double precision then
                     raise exception 'invalid jwt token';
                     return false;
                 else
