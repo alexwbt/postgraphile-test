@@ -20,8 +20,8 @@ export async function up(knex: Knex): Promise<void> {
     // create table account
     await knex.schema.withSchema('test_private').createTable('account', table => {
         table.increments();
-        table.string('email', 256).notNullable().unique();
-        table.string('password').notNullable();
+        table.string('email', 100).notNullable().unique();
+        table.string('password', 60).notNullable();
     });
 
     // create table account info

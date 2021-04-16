@@ -1,2 +1,4 @@
 require("ts-node/register");
-require("./main");
+if (process.argv.find(arg => arg == '--graphile_worker'))
+    require("./graphile_worker");
+else require("./main");
